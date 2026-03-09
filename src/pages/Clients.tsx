@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { Search, Star, CalendarPlus, ChevronDown, ChevronUp } from "lucide-react";
+import { Search, Star, CalendarPlus, ChevronDown, ChevronUp, Trash2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -62,6 +62,7 @@ const Clients = () => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["clients"] });
+      queryClient.invalidateQueries({ queryKey: ["clients-simple"] });
       setIsDialogOpen(false);
       setNewClientName("");
       setNewClientEmail("");
@@ -69,6 +70,26 @@ const Clients = () => {
     },
     onError: (error) => {
       toast.error("Erro ao cadastrar cliente: " + error.message);
+    },
+  });
+
+  const deleteClientMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase
+        .from("clients")
+        .delete()
+        .eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["clients"] });
+      queryClient.invalidateQueries({ queryKey: ["clients-simple"] });
+      queryClient.invalidateQueries({ queryKey: ["appointments"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard-metrics"] });
+      toast.success("Cliente excluído com sucesso!");
+    },
+    onError: (error) => {
+      toast.error("Erro ao excluir cliente: " + error.message);
     },
   });
 
@@ -327,7 +348,22 @@ const Clients = () => {
                         ))}
                       </div>
                     </div>
-                    <div className="ml-auto">
+                    <div className="ml-auto flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="border-destructive text-destructive hover:bg-destructive/10 text-xs"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (confirm(`Tem certeza que deseja excluir ${client.name}? Todos os agendamentos vinculados também serão removidos.`)) {
+                            deleteClientMutation.mutate(client.id);
+                          }
+                        }}
+                        disabled={deleteClientMutation.isPending}
+                      >
+                        <Trash2 className="w-3.5 h-3.5 mr-1.5" />
+                        Excluir
+                      </Button>
                       <Button
                         size="sm"
                         className="bg-primary text-primary-foreground hover:bg-primary/90 text-xs"
