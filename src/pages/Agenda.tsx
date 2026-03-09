@@ -2,9 +2,26 @@ import { useState } from "react";
 import { motion } from "framer-motion";
 import { format, addDays, startOfWeek } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { ChevronLeft, ChevronRight, Sparkles, X, User, Clock, Scissors } from "lucide-react";
+import { ChevronLeft, ChevronRight, Sparkles, X, User, Clock, Scissors, UserPlus, UserMinus, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
@@ -29,7 +46,7 @@ const aiSuggestions = [
   { dayOffset: 3, hour: 13, label: "Horário ideal" },
 ];
 
-const hours = Array.from({ length: 10 }, (_, i) => i + 8);
+const hours = Array.from({ length: 15 }, (_, i) => i + 8);
 
 const statusColors: Record<string, string> = {
   confirmed: "bg-primary/20 border-primary/30 text-primary",
@@ -41,6 +58,13 @@ const Agenda = () => {
   const queryClient = useQueryClient();
   const [weekStart, setWeekStart] = useState(startOfWeek(new Date(), { weekStartsOn: 1 }));
   const [selected, setSelected] = useState<Appointment | null>(null);
+
+  // States for Quick Client Actions
+  const [isAddClientOpen, setIsAddClientOpen] = useState(false);
+  const [isDeleteClientOpen, setIsDeleteClientOpen] = useState(false);
+  const [newClientName, setNewClientName] = useState("");
+  const [newClientEmail, setNewClientEmail] = useState("");
+  const [clientToDelete, setClientToDelete] = useState<string>("");
 
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
 
@@ -105,6 +129,79 @@ const Agenda = () => {
     }
   });
 
+  const { data: clients = [] } = useQuery({
+    queryKey: ['clients-simple'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('clients')
+        .select('id, name')
+        .order('name');
+      if (error) throw error;
+      return data;
+    }
+  });
+
+  const addClientMutation = useMutation({
+    mutationFn: async (newClient: { name: string; email: string }) => {
+      const { data, error } = await supabase
+        .from("clients")
+        .insert([newClient])
+        .select();
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["clients"] });
+      queryClient.invalidateQueries({ queryKey: ["clients-simple"] });
+      setIsAddClientOpen(false);
+      setNewClientName("");
+      setNewClientEmail("");
+      toast.success("Cliente cadastrado com sucesso!");
+    },
+    onError: (error) => {
+      toast.error("Erro ao cadastrar cliente: " + error.message);
+    },
+  });
+
+  const deleteClientMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase
+        .from("clients")
+        .delete()
+        .eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["clients"] });
+      queryClient.invalidateQueries({ queryKey: ["clients-simple"] });
+      queryClient.invalidateQueries({ queryKey: ["appointments"] });
+      setIsDeleteClientOpen(false);
+      setClientToDelete("");
+      toast.success("Cliente excluído com sucesso!");
+    },
+    onError: (error) => {
+      toast.error("Erro ao excluir cliente: " + error.message);
+    },
+  });
+
+  const handleAddClient = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newClientName.trim()) {
+      toast.error("O nome do cliente é obrigatório");
+      return;
+    }
+    addClientMutation.mutate({ name: newClientName, email: newClientEmail });
+  };
+
+  const handleDeleteClient = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!clientToDelete) {
+      toast.error("Selecione um cliente para excluir");
+      return;
+    }
+    deleteClientMutation.mutate(clientToDelete);
+  };
+
   return (
     <motion.div
       className="p-6 flex flex-col h-full"
@@ -136,11 +233,29 @@ const Agenda = () => {
             {/* Header */}
             <div className="border-b border-border p-2" />
             {weekDays.map((day, i) => (
-              <div key={i} className="border-b border-l border-border p-2 text-center">
+              <div key={i} className="border-b border-l border-border p-2 text-center group relative">
                 <p className="text-[10px] text-muted-foreground uppercase">
                   {format(day, "EEE", { locale: ptBR })}
                 </p>
-                <p className="text-sm font-medium text-foreground">{format(day, "dd")}</p>
+                <div className="flex items-center justify-center gap-1.5">
+                  <p className="text-sm font-medium text-foreground">{format(day, "dd")}</p>
+                  <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      onClick={() => setIsAddClientOpen(true)}
+                      className="text-primary hover:text-primary/80 transition-colors"
+                      title="Adicionar Cliente"
+                    >
+                      <UserPlus className="w-3 h-3" />
+                    </button>
+                    <button
+                      onClick={() => setIsDeleteClientOpen(true)}
+                      className="text-destructive hover:text-destructive/80 transition-colors"
+                      title="Excluir Cliente"
+                    >
+                      <UserMinus className="w-3 h-3" />
+                    </button>
+                  </div>
+                </div>
               </div>
             ))}
 
@@ -286,6 +401,91 @@ const Agenda = () => {
           </motion.div>
         )}
       </div>
+
+      {/* Add Client Dialog */}
+      <Dialog open={isAddClientOpen} onOpenChange={setIsAddClientOpen}>
+        <DialogContent className="sm:max-w-[425px]">
+          <form onSubmit={handleAddClient}>
+            <DialogHeader>
+              <DialogTitle>Novo Cliente (Atalho)</DialogTitle>
+              <DialogDescription>
+                Cadastre um novo cliente rapidamente.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-4 py-4">
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="agenda-name" className="text-right">Nome</Label>
+                <Input
+                  id="agenda-name"
+                  value={newClientName}
+                  onChange={(e) => setNewClientName(e.target.value)}
+                  placeholder="Nome completo"
+                  className="col-span-3"
+                  required
+                />
+              </div>
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="agenda-email" className="text-right">Email</Label>
+                <Input
+                  id="agenda-email"
+                  type="email"
+                  value={newClientEmail}
+                  onChange={(e) => setNewClientEmail(e.target.value)}
+                  placeholder="Opcional"
+                  className="col-span-3"
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button type="submit" disabled={addClientMutation.isPending}>
+                {addClientMutation.isPending ? "Cadastrando..." : "Cadastrar Cliente"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Client Dialog */}
+      <Dialog open={isDeleteClientOpen} onOpenChange={setIsDeleteClientOpen}>
+        <DialogContent className="sm:max-w-[425px]">
+          <form onSubmit={handleDeleteClient}>
+            <DialogHeader>
+              <DialogTitle>Excluir Cliente (Atalho)</DialogTitle>
+              <DialogDescription>
+                Selecione o cliente que deseja remover da base de dados. Esta ação é irreversível.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-4 py-4">
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label className="text-right">Cliente</Label>
+                <div className="col-span-3">
+                  <Select value={clientToDelete} onValueChange={setClientToDelete}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecione um cliente" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {clients.map((c: any) => (
+                        <SelectItem key={c.id} value={c.id}>
+                          {c.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button
+                type="submit"
+                variant="destructive"
+                disabled={deleteClientMutation.isPending || !clientToDelete}
+              >
+                {deleteClientMutation.isPending ? "Excluindo..." : "Excluir Definitivamente"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </motion.div>
   );
 };
