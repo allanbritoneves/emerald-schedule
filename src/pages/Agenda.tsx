@@ -6,25 +6,21 @@ import { ChevronLeft, ChevronRight, Sparkles, X, User, Clock, Scissors } from "l
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
+
 type Appointment = {
-  id: number;
+  id: string;
   hour: number;
   duration: number;
   client: string;
   service: string;
   status: "confirmed" | "pending" | "cancelled";
   dayOffset: number;
+  originalDate?: Date;
 };
 
-const mockAppointments: Appointment[] = [
-  { id: 1, hour: 9, duration: 1, client: "Ana Silva", service: "Corte + Escova", status: "confirmed", dayOffset: 0 },
-  { id: 2, hour: 10, duration: 1, client: "Carlos Mendes", service: "Barba", status: "confirmed", dayOffset: 0 },
-  { id: 3, hour: 14, duration: 2, client: "Julia Santos", service: "Coloração", status: "pending", dayOffset: 1 },
-  { id: 4, hour: 11, duration: 1, client: "Pedro Lima", service: "Corte Masculino", status: "confirmed", dayOffset: 2 },
-  { id: 5, hour: 15, duration: 1, client: "Mariana Costa", service: "Hidratação", status: "confirmed", dayOffset: 3 },
-  { id: 6, hour: 9, duration: 1, client: "Rafael Oliveira", service: "Corte + Barba", status: "pending", dayOffset: 4 },
-  { id: 7, hour: 16, duration: 1, client: "Lucia Ferreira", service: "Manicure", status: "confirmed", dayOffset: 4 },
-];
+
 
 const aiSuggestions = [
   { dayOffset: 1, hour: 10, label: "Sugerido pela IA" },
@@ -44,6 +40,41 @@ const Agenda = () => {
   const [selected, setSelected] = useState<Appointment | null>(null);
 
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
+
+  const { data: appointments = [], isLoading } = useQuery({
+    queryKey: ['appointments', weekStart.toISOString()],
+    queryFn: async () => {
+      const endOfWeek = addDays(weekStart, 6);
+
+      const { data, error } = await supabase
+        .from('appointments')
+        .select(`
+          id, service_name, scheduled_at, duration_minutes, status,
+          clients ( name )
+        `)
+        .gte('scheduled_at', weekStart.toISOString())
+        .lte('scheduled_at', endOfWeek.toISOString());
+
+      if (error) throw error;
+
+      return data.map((a: any) => {
+        const date = new Date(a.scheduled_at);
+        // Calcula a diferença de dias considerando o fuso horário
+        const dayOffset = Math.floor((date.getTime() - weekStart.getTime() + (weekStart.getTimezoneOffset() - date.getTimezoneOffset()) * 60000) / (1000 * 60 * 60 * 24));
+
+        return {
+          id: a.id,
+          hour: date.getHours(),
+          duration: Math.max(1, a.duration_minutes / 60),
+          client: a.clients?.name || 'Cliente',
+          service: a.service_name,
+          status: a.status,
+          dayOffset,
+          originalDate: date
+        };
+      });
+    }
+  });
 
   return (
     <motion.div
@@ -93,8 +124,8 @@ const Agenda = () => {
                   </span>
                 </div>
                 {weekDays.map((_, dayIdx) => {
-                  const appt = mockAppointments.find(
-                    (a) => a.dayOffset === dayIdx && a.hour === hour
+                  const appt = appointments.find(
+                    (a: Appointment) => a.dayOffset === dayIdx && a.hour === hour
                   );
                   const aiSlot = aiSuggestions.find(
                     (s) => s.dayOffset === dayIdx && s.hour === hour
@@ -174,11 +205,14 @@ const Agenda = () => {
               </Badge>
 
               <div className="pt-3 border-t border-border">
-                <p className="text-xs text-muted-foreground mb-2">Histórico</p>
+                <p className="text-xs text-muted-foreground mb-2">Detalhes</p>
                 <div className="space-y-1.5">
-                  {["Corte — 15 Fev", "Escova — 02 Fev", "Corte — 18 Jan"].map((h, i) => (
-                    <p key={i} className="text-xs text-secondary-foreground">{h}</p>
-                  ))}
+                  <p className="text-xs text-secondary-foreground">
+                    Início: {selected.originalDate ? format(selected.originalDate, "dd/MM/yyyy HH:mm") : '—'}
+                  </p>
+                  <p className="text-xs text-secondary-foreground">
+                    Duração ref.: {selected.duration * 60} min
+                  </p>
                 </div>
               </div>
             </div>

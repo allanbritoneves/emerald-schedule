@@ -5,9 +5,22 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { toast } from "sonner";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
 
 type Client = {
-  id: number;
+  id: string;
   name: string;
   initials: string;
   email: string;
@@ -17,22 +30,150 @@ type Client = {
   history: string[];
 };
 
-const mockClients: Client[] = [
-  { id: 1, name: "Ana Silva", initials: "AS", email: "ana@email.com", visits: 24, totalSpent: "R$ 3.200", nextAppointment: "Hoje, 09:00", history: ["Corte + Escova — 01 Mar", "Hidratação — 15 Fev", "Corte — 01 Fev"] },
-  { id: 2, name: "Carlos Mendes", initials: "CM", email: "carlos@email.com", visits: 15, totalSpent: "R$ 1.800", nextAppointment: "Amanhã, 14:00", history: ["Barba — 28 Fev", "Corte + Barba — 14 Fev"] },
-  { id: 3, name: "Julia Santos", initials: "JS", email: "julia@email.com", visits: 8, totalSpent: "R$ 960", nextAppointment: null, history: ["Coloração — 25 Fev", "Corte — 10 Fev"] },
-  { id: 4, name: "Pedro Lima", initials: "PL", email: "pedro@email.com", visits: 32, totalSpent: "R$ 4.100", nextAppointment: "Sex, 11:00", history: ["Corte Masculino — 02 Mar", "Barba — 16 Fev", "Corte — 02 Fev"] },
-  { id: 5, name: "Mariana Costa", initials: "MC", email: "mariana@email.com", visits: 5, totalSpent: "R$ 650", nextAppointment: null, history: ["Manicure — 20 Fev"] },
-  { id: 6, name: "Rafael Oliveira", initials: "RO", email: "rafael@email.com", visits: 19, totalSpent: "R$ 2.400", nextAppointment: "Seg, 09:00", history: ["Corte + Barba — 27 Fev", "Corte — 13 Fev"] },
-];
-
 const VIP_THRESHOLD = 15;
 
 const Clients = () => {
   const [search, setSearch] = useState("");
-  const [expanded, setExpanded] = useState<number | null>(null);
+  const [expanded, setExpanded] = useState<string | null>(null);
 
-  const filtered = mockClients.filter((c) =>
+  // States for New Client Modal
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [newClientName, setNewClientName] = useState("");
+  const [newClientEmail, setNewClientEmail] = useState("");
+
+  // States for Schedule Appointment Modal
+  const [isScheduleDialogOpen, setIsScheduleDialogOpen] = useState(false);
+  const [selectedClientForSchedule, setSelectedClientForSchedule] = useState<{ id: string, name: string } | null>(null);
+  const [appointmentService, setAppointmentService] = useState("");
+  const [appointmentDate, setAppointmentDate] = useState("");
+  const [appointmentTime, setAppointmentTime] = useState("");
+
+  const queryClient = useQueryClient();
+
+  const addClientMutation = useMutation({
+    mutationFn: async (newClient: { name: string; email: string }) => {
+      const { data, error } = await supabase
+        .from("clients")
+        .insert([newClient])
+        .select();
+
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["clients"] });
+      setIsDialogOpen(false);
+      setNewClientName("");
+      setNewClientEmail("");
+      toast.success("Cliente cadastrado com sucesso!");
+    },
+    onError: (error) => {
+      toast.error("Erro ao cadastrar cliente: " + error.message);
+    },
+  });
+
+  const handleAddClient = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newClientName.trim()) {
+      toast.error("O nome do cliente é obrigatório");
+      return;
+    }
+    addClientMutation.mutate({ name: newClientName, email: newClientEmail });
+  };
+
+  const addAppointmentMutation = useMutation({
+    mutationFn: async (newAppt: { client_id: string; service_name: string; scheduled_at: string; duration_minutes: number }) => {
+      const { data, error } = await supabase
+        .from("appointments")
+        .insert([newAppt])
+        .select();
+
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["clients"] });
+      queryClient.invalidateQueries({ queryKey: ["appointments"] });
+      setIsScheduleDialogOpen(false);
+      setAppointmentService("");
+      setAppointmentDate("");
+      setAppointmentTime("");
+      toast.success("Agendamento criado com sucesso!");
+    },
+    onError: (error) => {
+      toast.error("Erro ao criar agendamento: " + error.message);
+    },
+  });
+
+  const handleScheduleAppointment = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedClientForSchedule) return;
+    if (!appointmentService.trim() || !appointmentDate || !appointmentTime) {
+      toast.error("Preencha todos os campos obrigatórios");
+      return;
+    }
+
+    // Combine date and time
+    const [year, month, day] = appointmentDate.split('-');
+    const [hours, minutes] = appointmentTime.split(':');
+    const scheduledAt = new Date(parseInt(year), parseInt(month) - 1, parseInt(day), parseInt(hours), parseInt(minutes));
+
+    addAppointmentMutation.mutate({
+      client_id: selectedClientForSchedule.id,
+      service_name: appointmentService,
+      scheduled_at: scheduledAt.toISOString(),
+      duration_minutes: 60 // Padrão: 1 hora
+    });
+  };
+
+  const { data: clients = [], isLoading } = useQuery({
+    queryKey: ['clients'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('clients')
+        .select(`
+          id, name, email,
+          appointments ( id, service_name, scheduled_at, duration_minutes, status )
+        `);
+
+      if (error) throw error;
+
+      return data.map(c => {
+        const initials = c.name.split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase();
+
+        const appts = c.appointments || [];
+        const pastAppts = appts.filter((a: any) => new Date(a.scheduled_at) < new Date() && a.status === 'confirmed');
+        const futureAppts = appts.filter((a: any) => new Date(a.scheduled_at) >= new Date() && a.status !== 'cancelled')
+          .sort((a: any, b: any) => new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime());
+
+        const visits = pastAppts.length;
+        const totalSpent = "R$ " + (visits * 120);
+
+        let nextAppointment = null;
+        if (futureAppts.length > 0) {
+          const nextDate = new Date(futureAppts[0].scheduled_at);
+          nextAppointment = nextDate.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+        }
+
+        const history = pastAppts.sort((a: any, b: any) => new Date(b.scheduled_at).getTime() - new Date(a.scheduled_at).getTime()).slice(0, 3).map((a: any) => {
+          return `${a.service_name} — ${new Date(a.scheduled_at).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}`;
+        });
+
+        return {
+          id: c.id,
+          name: c.name,
+          initials,
+          email: c.email || '',
+          visits,
+          totalSpent,
+          nextAppointment,
+          history
+        };
+      });
+    }
+  });
+
+  const filtered = clients.filter((c: Client) =>
     c.name.toLowerCase().includes(search.toLowerCase())
   );
 
@@ -46,13 +187,62 @@ const Clients = () => {
         <div>
           <h1 className="text-2xl font-serif text-foreground">Clientes</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            {mockClients.length} clientes cadastrados
+            {isLoading ? "Carregando..." : `${clients.length} clientes cadastrados`}
           </p>
         </div>
-        <Button className="bg-primary text-primary-foreground hover:bg-primary/90">
-          <CalendarPlus className="w-4 h-4 mr-2" />
-          Novo Cliente
-        </Button>
+
+        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+          <DialogTrigger asChild>
+            <Button className="bg-primary text-primary-foreground hover:bg-primary/90">
+              <CalendarPlus className="w-4 h-4 mr-2" />
+              Novo Cliente
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="sm:max-w-[425px]">
+            <form onSubmit={handleAddClient}>
+              <DialogHeader>
+                <DialogTitle>Novo Cliente</DialogTitle>
+                <DialogDescription>
+                  Adicione um novo cliente na sua base de dados. Clique em salvar quando terminar.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="grid gap-4 py-4">
+                <div className="grid grid-cols-4 items-center gap-4">
+                  <Label htmlFor="name" className="text-right">
+                    Nome
+                  </Label>
+                  <Input
+                    id="name"
+                    value={newClientName}
+                    onChange={(e) => setNewClientName(e.target.value)}
+                    placeholder="Ex: João da Silva"
+                    className="col-span-3"
+                    disabled={addClientMutation.isPending}
+                  />
+                </div>
+                <div className="grid grid-cols-4 items-center gap-4">
+                  <Label htmlFor="email" className="text-right">
+                    Email
+                  </Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    value={newClientEmail}
+                    onChange={(e) => setNewClientEmail(e.target.value)}
+                    placeholder="Opcional"
+                    className="col-span-3"
+                    disabled={addClientMutation.isPending}
+                  />
+                </div>
+              </div>
+              <DialogFooter>
+                <Button type="submit" disabled={addClientMutation.isPending}>
+                  {addClientMutation.isPending ? "Salvando..." : "Salvar mudanças"}
+                </Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
       </div>
 
       <div className="relative max-w-sm">
@@ -138,7 +328,15 @@ const Clients = () => {
                       </div>
                     </div>
                     <div className="ml-auto">
-                      <Button size="sm" className="bg-primary text-primary-foreground hover:bg-primary/90 text-xs">
+                      <Button
+                        size="sm"
+                        className="bg-primary text-primary-foreground hover:bg-primary/90 text-xs"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedClientForSchedule({ id: client.id, name: client.name });
+                          setIsScheduleDialogOpen(true);
+                        }}
+                      >
                         <CalendarPlus className="w-3.5 h-3.5 mr-1.5" />
                         Agendar agora
                       </Button>
@@ -156,6 +354,72 @@ const Clients = () => {
           </div>
         )}
       </div>
+
+      {/* Schedule Appointment Modal */}
+      <Dialog open={isScheduleDialogOpen} onOpenChange={setIsScheduleDialogOpen}>
+        <DialogContent className="sm:max-w-[425px]">
+          <form onSubmit={handleScheduleAppointment}>
+            <DialogHeader>
+              <DialogTitle>Novo Agendamento</DialogTitle>
+              <DialogDescription>
+                Agendando horário para <strong className="text-foreground">{selectedClientForSchedule?.name}</strong>.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-4 py-4">
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="service" className="text-right">
+                  Serviço
+                </Label>
+                <Input
+                  id="service"
+                  value={appointmentService}
+                  onChange={(e) => setAppointmentService(e.target.value)}
+                  placeholder="Ex: Corte Masculino"
+                  className="col-span-3"
+                  disabled={addAppointmentMutation.isPending}
+                  required
+                />
+              </div>
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="date" className="text-right">
+                  Data
+                </Label>
+                <Input
+                  id="date"
+                  type="date"
+                  value={appointmentDate}
+                  onChange={(e) => setAppointmentDate(e.target.value)}
+                  className="col-span-3"
+                  disabled={addAppointmentMutation.isPending}
+                  required
+                />
+              </div>
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="time" className="text-right">
+                  Horário
+                </Label>
+                <Input
+                  id="time"
+                  type="time"
+                  value={appointmentTime}
+                  onChange={(e) => setAppointmentTime(e.target.value)}
+                  className="col-span-3"
+                  disabled={addAppointmentMutation.isPending}
+                  required
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setIsScheduleDialogOpen(false)} disabled={addAppointmentMutation.isPending}>
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={addAppointmentMutation.isPending}>
+                {addAppointmentMutation.isPending ? "Confirmando..." : "Confirmar Agendamento"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </motion.div>
   );
 };

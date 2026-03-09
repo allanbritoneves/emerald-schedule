@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Sparkles, Clock, Flame, Link2, AlertTriangle } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
@@ -6,6 +6,8 @@ import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { toast } from "sonner";
+import { supabase } from "@/lib/supabase";
 
 const heatmapData = [
   [1, 2, 3, 5, 4, 3, 1],
@@ -37,6 +39,34 @@ const Settings = () => {
   const [interval, setInterval] = useState([15]);
   const [overbooking, setOverbooking] = useState(false);
   const [waitlist, setWaitlist] = useState(true);
+  const [isLoaded, setIsLoaded] = useState(false);
+
+  useEffect(() => {
+    const fetchSettings = async () => {
+      const { data, error } = await supabase.from('settings').select('*').eq('id', 1).single();
+      if (!error && data) {
+        setAiEnabled(data.ai_enabled);
+        setInterval([data.interval_minutes]);
+        setOverbooking(data.overbooking_enabled);
+        setWaitlist(data.waitlist_enabled);
+      }
+      setIsLoaded(true);
+    };
+    fetchSettings();
+  }, []);
+
+  const handleUpdate = async (field: string, value: any) => {
+    if (!isLoaded) return;
+
+    // Optimistic UI updating is handled by the caller component's state
+    const { error } = await supabase.from('settings').update({ [field]: value }).eq('id', 1);
+
+    if (error) {
+      toast.error("Erro ao salvar configuração.");
+    } else {
+      toast.success("Salvo com sucesso!");
+    }
+  };
 
   return (
     <motion.div
@@ -63,7 +93,13 @@ const Settings = () => {
               </p>
             </div>
           </div>
-          <Switch checked={aiEnabled} onCheckedChange={setAiEnabled} />
+          <Switch
+            checked={aiEnabled}
+            onCheckedChange={(v) => {
+              setAiEnabled(v);
+              handleUpdate('ai_enabled', v);
+            }}
+          />
         </div>
       </div>
 
@@ -79,6 +115,9 @@ const Settings = () => {
         <Slider
           value={interval}
           onValueChange={setInterval}
+          onValueCommit={(val) => {
+            handleUpdate('interval_minutes', val[0]);
+          }}
           min={5}
           max={60}
           step={5}
@@ -164,7 +203,13 @@ const Settings = () => {
           </div>
           <div className="flex items-center gap-2">
             {overbooking && <Badge variant="outline" className="status-pending text-[10px]">Ativo</Badge>}
-            <Switch checked={overbooking} onCheckedChange={setOverbooking} />
+            <Switch
+              checked={overbooking}
+              onCheckedChange={(v) => {
+                setOverbooking(v);
+                handleUpdate('overbooking_enabled', v);
+              }}
+            />
           </div>
         </div>
 
@@ -176,7 +221,13 @@ const Settings = () => {
               <p className="text-xs text-muted-foreground">Clientes podem entrar na fila quando lotado</p>
             </div>
           </div>
-          <Switch checked={waitlist} onCheckedChange={setWaitlist} />
+          <Switch
+            checked={waitlist}
+            onCheckedChange={(v) => {
+              setWaitlist(v);
+              handleUpdate('waitlist_enabled', v);
+            }}
+          />
         </div>
       </div>
     </motion.div>
