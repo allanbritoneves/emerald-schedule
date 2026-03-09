@@ -1,4 +1,4 @@
-import { Clock, User, Trash2, CalendarX } from "lucide-react";
+import { Clock, User, Trash2, CalendarX, Check } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
@@ -40,6 +40,26 @@ export function UpcomingAppointments() {
         service: a.service_name,
         status: a.status as Status,
       }));
+    }
+  });
+
+  const updateStatusMutation = useMutation({
+    mutationFn: async ({ id, status }: { id: string; status: Status }) => {
+      const { error } = await supabase
+        .from('appointments')
+        .update({ status })
+        .eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['upcoming-appointments'] });
+      queryClient.invalidateQueries({ queryKey: ['appointments'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard-metrics'] });
+      queryClient.invalidateQueries({ queryKey: ['pending-appointments-count'] });
+      toast.success("Agendamento confirmado!");
+    },
+    onError: (error) => {
+      toast.error("Erro ao confirmar: " + error.message);
     }
   });
 
@@ -113,15 +133,28 @@ export function UpcomingAppointments() {
                   <Badge variant="outline" className={`text-[9px] px-1.5 py-0 leading-tight ${s.className}`}>
                     {s.label}
                   </Badge>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
-                    onClick={() => deleteMutation.mutate(a.id)}
-                    disabled={deleteMutation.isPending}
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </Button>
+                  <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    {a.status === 'pending' && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 text-primary hover:text-primary hover:bg-primary/10"
+                        onClick={() => updateStatusMutation.mutate({ id: a.id, status: 'confirmed' })}
+                        disabled={updateStatusMutation.isPending}
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                      </Button>
+                    )}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                      onClick={() => deleteMutation.mutate(a.id)}
+                      disabled={deleteMutation.isPending}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </Button>
+                  </div>
                 </div>
               </div>
             );

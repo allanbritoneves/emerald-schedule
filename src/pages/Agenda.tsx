@@ -6,8 +6,10 @@ import { ChevronLeft, ChevronRight, Sparkles, X, User, Clock, Scissors } from "l
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
+import { toast } from "sonner";
+import { Check, XCircle } from "lucide-react";
 
 type Appointment = {
   id: string;
@@ -36,6 +38,7 @@ const statusColors: Record<string, string> = {
 };
 
 const Agenda = () => {
+  const queryClient = useQueryClient();
   const [weekStart, setWeekStart] = useState(startOfWeek(new Date(), { weekStartsOn: 1 }));
   const [selected, setSelected] = useState<Appointment | null>(null);
 
@@ -73,6 +76,32 @@ const Agenda = () => {
           originalDate: date
         };
       });
+    }
+  });
+
+  const updateStatusMutation = useMutation({
+    mutationFn: async ({ id, status }: { id: string; status: Appointment["status"] }) => {
+      const { error } = await supabase
+        .from('appointments')
+        .update({ status })
+        .eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['appointments'] });
+      queryClient.invalidateQueries({ queryKey: ['upcoming-appointments'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard-metrics'] });
+      queryClient.invalidateQueries({ queryKey: ['pending-appointments-count'] });
+
+      if (selected?.id === variables.id) {
+        setSelected(prev => prev ? { ...prev, status: variables.status } : null);
+      }
+
+      const statusLabels = { confirmed: "confirmado", cancelled: "cancelado", pending: "pendente" };
+      toast.success(`Agendamento ${statusLabels[variables.status]}!`);
+    },
+    onError: (error) => {
+      toast.error("Erro ao atualizar status: " + error.message);
     }
   });
 
@@ -204,17 +233,55 @@ const Agenda = () => {
                 {selected.status === "confirmed" ? "Confirmado" : selected.status === "pending" ? "Pendente" : "Cancelado"}
               </Badge>
 
-              <div className="pt-3 border-t border-border">
-                <p className="text-xs text-muted-foreground mb-2">Detalhes</p>
-                <div className="space-y-1.5">
-                  <p className="text-xs text-secondary-foreground">
-                    Início: {selected.originalDate ? format(selected.originalDate, "dd/MM/yyyy HH:mm") : '—'}
-                  </p>
-                  <p className="text-xs text-secondary-foreground">
-                    Duração ref.: {selected.duration * 60} min
-                  </p>
+              {selected.status === "pending" && (
+                <div className="flex gap-2 pt-2">
+                  <Button
+                    className="flex-1 bg-primary hover:bg-primary/90 gap-2"
+                    size="sm"
+                    onClick={() => updateStatusMutation.mutate({ id: selected.id, status: "confirmed" })}
+                    disabled={updateStatusMutation.isPending}
+                  >
+                    <Check className="w-4 h-4" />
+                    Confirmar
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="flex-1 border-destructive text-destructive hover:bg-destructive/10 gap-2"
+                    size="sm"
+                    onClick={() => updateStatusMutation.mutate({ id: selected.id, status: "cancelled" })}
+                    disabled={updateStatusMutation.isPending}
+                  >
+                    <XCircle className="w-4 h-4" />
+                    Cancelar
+                  </Button>
                 </div>
-              </div>
+              )}
+
+              {selected.status === "confirmed" && (
+                <Button
+                  variant="outline"
+                  className="w-full border-destructive text-destructive hover:bg-destructive/10 gap-2"
+                  size="sm"
+                  onClick={() => updateStatusMutation.mutate({ id: selected.id, status: "cancelled" })}
+                  disabled={updateStatusMutation.isPending}
+                >
+                  <XCircle className="w-4 h-4" />
+                  Cancelar Agendamento
+                </Button>
+              )}
+
+              {selected.status === "cancelled" && (
+                <Button
+                  variant="outline"
+                  className="w-full border-primary text-primary hover:bg-primary/10 gap-2"
+                  size="sm"
+                  onClick={() => updateStatusMutation.mutate({ id: selected.id, status: "confirmed" })}
+                  disabled={updateStatusMutation.isPending}
+                >
+                  <Check className="w-4 h-4" />
+                  Reativar (Confirmar)
+                </Button>
+              )}
             </div>
           </motion.div>
         )}
