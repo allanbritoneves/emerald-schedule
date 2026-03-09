@@ -8,8 +8,24 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
 
 export function AppHeader() {
+  const { data: pendingCount = 0 } = useQuery({
+    queryKey: ['pending-appointments-count'],
+    queryFn: async () => {
+      const { count, error } = await supabase
+        .from('appointments')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'pending');
+
+      if (error) throw error;
+      return count || 0;
+    },
+    refetchInterval: 30000, // Atualiza a cada 30 segundos
+  });
+
   return (
     <header className="h-14 flex items-center gap-4 px-4 border-b border-border bg-card/50 backdrop-blur-sm shrink-0">
       <SidebarTrigger />
@@ -25,9 +41,11 @@ export function AppHeader() {
       <div className="ml-auto flex items-center gap-3">
         <Popover>
           <PopoverTrigger asChild>
-            <Button variant="ghost" size="icon" className="relative">
-              <Bell className="w-4 h-4" />
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-primary" />
+            <Button variant="ghost" size="icon" className="relative group">
+              <Bell className="w-4 h-4 transition-transform group-hover:rotate-12" />
+              {pendingCount > 0 && (
+                <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-primary border-2 border-background" />
+              )}
             </Button>
           </PopoverTrigger>
           <PopoverContent className="w-80 p-0" align="end">
