@@ -8,18 +8,47 @@ import {
   ResponsiveContainer,
   Legend,
 } from "recharts";
-
-const data = [
-  { day: "Seg", agendamentos: 8, cancelamentos: 1 },
-  { day: "Ter", agendamentos: 12, cancelamentos: 2 },
-  { day: "Qua", agendamentos: 10, cancelamentos: 1 },
-  { day: "Qui", agendamentos: 15, cancelamentos: 3 },
-  { day: "Sex", agendamentos: 18, cancelamentos: 2 },
-  { day: "Sáb", agendamentos: 22, cancelamentos: 1 },
-  { day: "Dom", agendamentos: 5, cancelamentos: 0 },
-];
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
+import { format, subDays, eachDayOfInterval, isSameDay } from "date-fns";
+import { ptBR } from "date-fns/locale";
+import { Loader2 } from "lucide-react";
 
 export function WeeklyChart() {
+  const { data = [], isLoading } = useQuery({
+    queryKey: ['weekly-stats'],
+    queryFn: async () => {
+      const end = new Date();
+      const start = subDays(end, 6);
+
+      const { data: appointments, error } = await supabase
+        .from('appointments')
+        .select('scheduled_at, status')
+        .gte('scheduled_at', start.toISOString())
+        .lte('scheduled_at', end.toISOString());
+
+      if (error) throw error;
+
+      const days = eachDayOfInterval({ start, end });
+
+      return days.map(day => {
+        const dayAppts = appointments.filter(a => isSameDay(new Date(a.scheduled_at), day));
+        return {
+          day: format(day, "eee", { locale: ptBR }),
+          agendamentos: dayAppts.filter(a => a.status === 'confirmed').length,
+          cancelamentos: dayAppts.filter(a => a.status === 'cancelled').length,
+        };
+      });
+    }
+  });
+
+  if (isLoading) {
+    return (
+      <div className="glass-card p-5 h-[340px] flex items-center justify-center">
+        <Loader2 className="w-6 h-6 text-muted-foreground animate-spin" />
+      </div>
+    );
+  }
   return (
     <div className="glass-card p-5">
       <h3 className="font-serif text-lg text-foreground mb-4">
@@ -27,7 +56,7 @@ export function WeeklyChart() {
       </h3>
       <ResponsiveContainer width="100%" height={260}>
         <LineChart data={data}>
-          <CartesianGrid strokeDasharray="3 3" stroke="hsl(220 12% 18%)" />
+          <CartesianGrid strokeDasharray="3 3" stroke="hsl(220 12% 18%)" vertical={false} />
           <XAxis
             dataKey="day"
             stroke="hsl(220 10% 55%)"

@@ -12,18 +12,48 @@ import {
   subMonths,
 } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-
-const busyDays = [3, 5, 8, 12, 14, 17, 19, 22, 25, 28];
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
 
 export function MiniCalendar() {
   const [current, setCurrent] = useState(new Date());
+
+  const { data: busyDays = [], isLoading } = useQuery({
+    queryKey: ['busy-days', format(current, "yyyy-MM")],
+    queryFn: async () => {
+      const monthStart = startOfMonth(current).toISOString();
+      const monthEnd = endOfMonth(current).toISOString();
+
+      const { data, error } = await supabase
+        .from('appointments')
+        .select('scheduled_at')
+        .gte('scheduled_at', monthStart)
+        .lte('scheduled_at', monthEnd)
+        .neq('status', 'cancelled');
+
+      if (error) throw error;
+
+      // Get unique days from appointments
+      const uniqueDays = new Set(data.map(a => new Date(a.scheduled_at).getDate()));
+      return Array.from(uniqueDays);
+    }
+  });
+
   const monthStart = startOfMonth(current);
   const monthEnd = endOfMonth(current);
   const start = startOfWeek(monthStart, { weekStartsOn: 1 });
   const end = endOfWeek(monthEnd, { weekStartsOn: 1 });
   const days = eachDayOfInterval({ start, end });
+
+  if (isLoading) {
+    return (
+      <div className="glass-card p-5 h-[340px] flex items-center justify-center">
+        <Loader2 className="w-5 h-5 text-muted-foreground animate-spin" />
+      </div>
+    );
+  }
 
   return (
     <div className="glass-card p-5">
