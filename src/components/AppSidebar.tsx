@@ -5,6 +5,7 @@ import {
   Settings,
   Sparkles,
   Calendar,
+  LogOut,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
@@ -19,6 +20,9 @@ import {
   SidebarFooter,
   useSidebar,
 } from "@/components/ui/sidebar";
+import { Button } from "@/components/ui/button";
+import { supabase } from "@/lib/supabase";
+import { toast } from "sonner";
 
 const navItems = [
   { title: "Dashboard", url: "/", icon: LayoutDashboard },
@@ -31,6 +35,15 @@ export function AppSidebar() {
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
   const location = useLocation();
+
+  const handleLogout = async () => {
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      toast.error("Erro ao sair: " + error.message);
+    } else {
+      toast.success("Sessão encerrada");
+    }
+  };
 
   return (
     <Sidebar collapsible="icon" className="border-r border-border">
@@ -89,6 +102,16 @@ export function AppSidebar() {
             </p>
           </div>
         )}
+        <div className="px-3 pb-3">
+          <Button
+            variant="ghost"
+            className="w-full justify-start text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+            onClick={handleLogout}
+          >
+            <LogOut className="w-4 h-4 mr-2" />
+            {!collapsed && <span>Sair da conta</span>}
+          </Button>
+        </div>
       </SidebarFooter>
     </Sidebar>
   );
